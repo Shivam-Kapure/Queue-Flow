@@ -1,0 +1,19 @@
+{
+  "name": "queueflow-core",
+  "version": "1.0.0",
+  "description": "Core queueing logic algorithms for FIFO, Priority, and VIP Waiting Rooms.",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "node test.js"
+  },
+  "keywords": [
+    "queue",
+    "waiting-room",
+    "fifo",
+    "priority",
+    "saas"
+  ],
+  "author": "QueueFlow Dev Team",
+  "license": "MIT"
+}
