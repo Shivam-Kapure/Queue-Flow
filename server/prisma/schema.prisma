@@ -1,0 +1,113 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  USER
+  MODERATOR
+  ADMIN
+}
+
+enum QueueType {
+  FIFO
+  PRIORITY
+  VIP
+}
+
+enum MemberStatus {
+  WAITING
+  SERVED
+  LEFT
+}
+
+model User {
+  id            String         @id @default(uuid())
+  email         String         @unique
+  password      String
+  name          String
+  role          Role           @default(USER)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  queues        Queue[]        @relation("AdminQueues")
+  memberships   QueueMember[]
+  notifications Notification[]
+
+  @@map("users")
+}
+
+model Queue {
+  id                String       @id @default(uuid())
+  title             String
+  slug              String       @unique
+  description       String?
+  type              QueueType    @default(FIFO)
+  avgProcessingTime Int          @default(60) // average processing time per user in seconds
+  rateLimit         Int          @default(15) // joins allowed per minute
+  isActive          Boolean      @default(true)
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  adminId           String
+  admin             User         @relation("AdminQueues", fields: [adminId], references: [id])
+  members           QueueMember[]
+  events            QueueEvent[]
+  analytics         Analytics[]
+
+  @@map("queues")
+}
+
+model QueueMember {
+  id            String       @id @default(uuid())
+  userId        String
+  user          User         @relation(fields: [userId], references: [id])
+  queueId       String
+  queue         Queue        @relation(fields: [queueId], references: [id])
+  joinedAt      DateTime     @default(now())
+  position      Int          // Current position in the queue
+  status        MemberStatus @default(WAITING)
+  priorityScore Int          @default(0)  // higher means higher priority
+  isVip         Boolean      @default(false)
+  servedAt      DateTime?
+  leftAt        DateTime?
+
+  @@map("queue_members")
+}
+
+model QueueEvent {
+  id        String   @id @default(uuid())
+  queueId   String
+  queue     Queue    @relation(fields: [queueId], references: [id])
+  eventType String   // e.g. "JOIN", "SERVED", "LEFT", "PAUSE", "RESUME"
+  metadata  String?  // Additional details JSON stringified
+  timestamp DateTime @default(now())
+
+  @@map("queue_events")
+}
+
+model Analytics {
+  id             String   @id @default(uuid())
+  queueId        String
+  queue          Queue    @relation(fields: [queueId], references: [id])
+  date           DateTime @default(now())
+  servedCount    Int      @default(0)
+  abandonedCount Int      @default(0)
+  avgWaitTime    Float    @default(0.0) // average wait time in seconds
+
+  @@map("analytics")
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  title     String
+  message   String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@map("notifications")
+}
