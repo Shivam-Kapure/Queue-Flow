@@ -3,6 +3,7 @@ import { useStore } from '../../store/useStore';
 import { motion } from 'framer-motion';
 import axios from 'axios';
 import { Trash, Play, Pause, UserCheck, Plus, Sparkles, RefreshCw } from 'lucide-react';
+import { API_URL } from '../../config';
 
 
 export default function AdminDashboard() {
@@ -72,7 +73,7 @@ export default function AdminDashboard() {
       const config = { headers: { Authorization: `Bearer ${token}` } };
       
       // Load current wait room positions from DB
-      const resQueue = await axios.get(`http://localhost:5000/api/queues/slug/${queue.slug}`);
+      const resQueue = await axios.get(`${API_URL}/queues/slug/${queue.slug}`);
       setSelectedQueue(resQueue.data);
 
       // Initialize settings states
@@ -80,11 +81,11 @@ export default function AdminDashboard() {
       setServeInterval(resQueue.data.serveInterval || 10);
       
       // Get analytics
-      const resAnalytics = await axios.get(`http://localhost:5000/api/analytics/${queue.id}`, config);
+      const resAnalytics = await axios.get(`${API_URL}/analytics/${queue.id}`, config);
       setAnalytics(resAnalytics.data);
 
       // Fetch member list sorted by position
-      const resMembers = await axios.get(`http://localhost:5000/api/queues`, config);
+      const resMembers = await axios.get(`${API_URL}/queues`, config);
       const fullQueue = resMembers.data.find(q => q.id === queue.id);
       
       // Set waiting members directly
@@ -140,7 +141,7 @@ export default function AdminDashboard() {
 
     try {
       const config = { headers: { Authorization: `Bearer ${token}` } };
-      const res = await axios.patch(`http://localhost:5000/api/queues/${selectedQueue.id}/settings`, {
+      const res = await axios.patch(`${API_URL}/queues/${selectedQueue.id}/settings`, {
         isAutoServe,
         serveInterval: Number(serveInterval)
       }, config);

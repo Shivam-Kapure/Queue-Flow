@@ -1,9 +1,7 @@
 import { create } from 'zustand';
 import axios from 'axios';
 import { io } from 'socket.io-client';
-
-const API_URL = 'http://localhost:5000/api';
-const SOCKET_URL = 'http://localhost:5000';
+import { API_URL, SOCKET_URL } from '../config';
 
 export const useStore = create((set, get) => ({
   // Authentication State

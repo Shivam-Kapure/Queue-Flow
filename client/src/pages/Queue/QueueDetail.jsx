@@ -4,6 +4,7 @@ import { useStore } from '../../store/useStore';
 import { motion, AnimatePresence } from 'framer-motion';
 import axios from 'axios';
 import { ShieldCheck, LogOut, Loader2, Award, KeyRound } from 'lucide-react';
+import { API_URL } from '../../config';
 
 export default function QueueDetail() {
   const { slug } = useParams();
@@ -34,7 +35,7 @@ export default function QueueDetail() {
     }
     const loadQueue = async () => {
       try {
-        const res = await axios.get(`http://localhost:5000/api/queues/slug/${slug}`);
+        const res = await axios.get(`${API_URL}/queues/slug/${slug}`);
         setQueue(res.data);
         
         // If user logged in, check if they are already in the queue
