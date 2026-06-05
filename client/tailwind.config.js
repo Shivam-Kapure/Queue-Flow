@@ -14,7 +14,7 @@ export default {
         border: 'rgba(255, 255, 255, 0.08)',
       },
       fontFamily: {
-        sans: ['Outfit', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
+        sans: ['Plus Jakarta Sans', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
         display: ['Syne', 'sans-serif'],
       },
       animation: {

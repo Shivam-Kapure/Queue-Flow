@@ -1,6 +1,8 @@
 import { PrismaClient } from '@prisma/client';
 import { queueCache } from '../cache/queueCache.js';
 import { broadcastQueueUpdate, broadcastUserServed } from '../socket/socketHandler.js';
+import { processServeNext } from '../services/queueService.js';
+import { startQueueInterval, stopQueueInterval } from '../services/autoServeManager.js';
 
 const prisma = new PrismaClient();
 
@@ -14,7 +16,7 @@ const generateSlug = (title) => {
 };
 
 export const createQueue = async (req, res) => {
-  const { title, description, type, avgProcessingTime, rateLimit } = req.body;
+  const { title, description, type, avgProcessingTime, rateLimit, isAutoServe, serveInterval } = req.body;
 
   if (!title) {
     return res.status(400).json({ error: 'Queue title is required.' });
@@ -29,10 +31,16 @@ export const createQueue = async (req, res) => {
         type: type || 'FIFO',
         avgProcessingTime: Number(avgProcessingTime) || 60,
         rateLimit: Number(rateLimit) || 15,
+        isAutoServe: isAutoServe === true || isAutoServe === 'true',
+        serveInterval: Number(serveInterval) || 10,
         adminId: req.user.id,
         slug
       }
     });
+
+    if (queue.isActive && queue.isAutoServe) {
+      startQueueInterval(queue.id, queue.serveInterval);
+    }
 
     res.status(201).json(queue);
   } catch (error) {
@@ -42,13 +50,30 @@ export const createQueue = async (req, res) => {
 
 export const getQueues = async (req, res) => {
   try {
+    const includeQuery = {
+      _count: {
+        select: { members: { where: { status: 'WAITING' } } }
+      }
+    };
+
+    if (req.user.role === 'ADMIN') {
+      includeQuery.members = {
+        where: { status: 'WAITING' },
+        orderBy: { position: 'asc' },
+        include: {
+          user: {
+            select: {
+              name: true,
+              email: true
+            }
+          }
+        }
+      };
+    }
+
     const queues = await prisma.queue.findMany({
       where: req.user.role === 'ADMIN' ? { adminId: req.user.id } : { isActive: true },
-      include: {
-        _count: {
-          select: { members: { where: { status: 'WAITING' } } }
-        }
-      },
+      include: includeQuery,
       orderBy: { createdAt: 'desc' }
     });
 
@@ -96,6 +121,13 @@ export const toggleQueueActive = async (req, res) => {
       data: { isActive: !!isActive }
     });
 
+    // Handle Auto-Serve scheduler interval
+    if (updatedQueue.isActive && updatedQueue.isAutoServe) {
+      startQueueInterval(updatedQueue.id, updatedQueue.serveInterval);
+    } else {
+      stopQueueInterval(updatedQueue.id);
+    }
+
     // Track status change event
     await prisma.queueEvent.create({
       data: {
@@ -120,91 +152,53 @@ export const serveNext = async (req, res) => {
       return res.status(403).json({ error: 'Unauthorized to manage this queue.' });
     }
 
-    // Process from cache
-    const servedMember = await queueCache.serveNext(queueId);
+    // Process using core queue service
+    const servedMember = await processServeNext(queueId);
 
     if (!servedMember) {
       return res.status(200).json({ message: 'Queue is empty. No user to serve.' });
     }
 
-    const now = new Date();
-
-    // Find the member record in the DB
-    const dbMember = await prisma.queueMember.findFirst({
-      where: {
-        queueId,
-        userId: servedMember.id,
-        status: 'WAITING'
-      }
-    });
-
-    if (!dbMember) {
-      return res.status(404).json({ error: 'Member record not found in database.' });
-    }
-
-    // Update status to SERVED in database
-    await prisma.queueMember.update({
-      where: { id: dbMember.id },
-      data: {
-        status: 'SERVED',
-        servedAt: now,
-        position: 0 // served means no longer in waiting list
-      }
-    });
-
-    // Log the event
-    await prisma.queueEvent.create({
-      data: {
-        queueId,
-        eventType: 'SERVED',
-        metadata: JSON.stringify({ userId: servedMember.id, servedAt: now })
-      }
-    });
-
-    // Update daily analytics
-    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const waitTimeSeconds = (now.getTime() - new Date(dbMember.joinedAt).getTime()) / 1000;
-
-    let analyticsRecord = await prisma.analytics.findFirst({
-      where: {
-        queueId,
-        date: {
-          gte: startOfDay
-        }
-      }
-    });
-
-    if (!analyticsRecord) {
-      await prisma.analytics.create({
-        data: {
-          queueId,
-          date: now,
-          servedCount: 1,
-          avgWaitTime: waitTimeSeconds
-        }
-      });
-    } else {
-      const newServedCount = analyticsRecord.servedCount + 1;
-      const newAvgWaitTime = ((analyticsRecord.avgWaitTime * analyticsRecord.servedCount) + waitTimeSeconds) / newServedCount;
-
-      await prisma.analytics.update({
-        where: { id: analyticsRecord.id },
-        data: {
-          servedCount: newServedCount,
-          avgWaitTime: newAvgWaitTime
-        }
-      });
-    }
-
-    // Broadcast the served user update to that queue socket room
-    broadcastUserServed(queue.slug, servedMember.id);
-    
-    // Broadcast updated positions to all remaining members in the room
-    broadcastQueueUpdate(queue.slug);
-
     res.status(200).json({ message: 'User served successfully', user: servedMember });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Failed to serve next user.' });
+  }
+};
+
+export const updateQueueSettings = async (req, res) => {
+  const { queueId } = req.params;
+  const { isAutoServe, serveInterval, title, description, type, avgProcessingTime, rateLimit } = req.body;
+
+  try {
+    const queue = await prisma.queue.findUnique({ where: { id: queueId } });
+    if (!queue || (req.user.role !== 'ADMIN' && queue.adminId !== req.user.id)) {
+      return res.status(403).json({ error: 'Unauthorized to modify this queue.' });
+    }
+
+    const updatedQueue = await prisma.queue.update({
+      where: { id: queueId },
+      data: {
+        title: title !== undefined ? title : queue.title,
+        description: description !== undefined ? description : queue.description,
+        type: type !== undefined ? type : queue.type,
+        avgProcessingTime: avgProcessingTime !== undefined ? Number(avgProcessingTime) : queue.avgProcessingTime,
+        rateLimit: rateLimit !== undefined ? Number(rateLimit) : queue.rateLimit,
+        isAutoServe: isAutoServe !== undefined ? !!isAutoServe : queue.isAutoServe,
+        serveInterval: serveInterval !== undefined ? Number(serveInterval) : queue.serveInterval
+      }
+    });
+
+    // Update AutoServe scheduler accordingly
+    if (updatedQueue.isActive && updatedQueue.isAutoServe) {
+      startQueueInterval(updatedQueue.id, updatedQueue.serveInterval);
+    } else {
+      stopQueueInterval(updatedQueue.id);
+    }
+
+    res.status(200).json(updatedQueue);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to update queue settings.' });
   }
 };

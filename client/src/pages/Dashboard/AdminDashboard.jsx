@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import axios from 'axios';
 import { Trash, Play, Pause, UserCheck, Plus, Sparkles, RefreshCw } from 'lucide-react';
 
+
 export default function AdminDashboard() {
   const {
     queues,
@@ -11,12 +12,18 @@ export default function AdminDashboard() {
     createQueue,
     serveNextUser,
     toggleQueueState,
-    token
+    token,
+    socket,
+    initSocketConnection
   } = useStore();
 
   const [selectedQueue, setSelectedQueue] = useState(null);
   const [activeMembers, setActiveMembers] = useState([]);
   const [analytics, setAnalytics] = useState(null);
+
+  // Auto-Serve configuration states
+  const [isAutoServe, setIsAutoServe] = useState(false);
+  const [serveInterval, setServeInterval] = useState(10);
 
   // Form states
   const [title, setTitle] = useState('');
@@ -31,6 +38,32 @@ export default function AdminDashboard() {
     fetchQueues();
   }, []);
 
+  // Listen for real-time queue updates
+  useEffect(() => {
+    if (!selectedQueue || !token) return;
+
+    // Connect socket to this room
+    initSocketConnection(selectedQueue.slug);
+    
+    // Retrieve socket instance from store
+    const socketInstance = useStore.getState().socket;
+    if (!socketInstance) return;
+
+    const handleQueueTick = ({ queueId }) => {
+      if (queueId === selectedQueue.id) {
+        // Refresh details when members join or leave
+        loadQueueDetails(selectedQueue);
+      }
+    };
+
+    socketInstance.on('queue_tick', handleQueueTick);
+
+    return () => {
+      socketInstance.off('queue_tick', handleQueueTick);
+      socketInstance.emit('leave_queue_room', { queueSlug: selectedQueue.slug });
+    };
+  }, [selectedQueue, token]);
+
   const loadQueueDetails = async (queue) => {
     setSelectedQueue(queue);
     
@@ -40,6 +73,11 @@ export default function AdminDashboard() {
       
       // Load current wait room positions from DB
       const resQueue = await axios.get(`http://localhost:5000/api/queues/slug/${queue.slug}`);
+      setSelectedQueue(resQueue.data);
+
+      // Initialize settings states
+      setIsAutoServe(resQueue.data.isAutoServe || false);
+      setServeInterval(resQueue.data.serveInterval || 10);
       
       // Get analytics
       const resAnalytics = await axios.get(`http://localhost:5000/api/analytics/${queue.id}`, config);
@@ -49,9 +87,7 @@ export default function AdminDashboard() {
       const resMembers = await axios.get(`http://localhost:5000/api/queues`, config);
       const fullQueue = resMembers.data.find(q => q.id === queue.id);
       
-      // Load active member details manually from database queries
-      const resDetail = await axios.get(`http://localhost:5000/api/analytics/${queue.id}`, config);
-      // Let's query matching active members directly
+      // Set waiting members directly
       setActiveMembers(fullQueue?.members || []);
     } catch (err) {
       console.error('Failed to load queue details:', err);
@@ -95,6 +131,26 @@ export default function AdminDashboard() {
       fetchQueues();
     } catch (err) {
       alert(err.message);
+    }
+  };
+
+  const handleUpdateSettings = async (e) => {
+    e.preventDefault();
+    if (!selectedQueue) return;
+
+    try {
+      const config = { headers: { Authorization: `Bearer ${token}` } };
+      const res = await axios.patch(`http://localhost:5000/api/queues/${selectedQueue.id}/settings`, {
+        isAutoServe,
+        serveInterval: Number(serveInterval)
+      }, config);
+      
+      setSelectedQueue(res.data);
+      fetchQueues();
+      alert('Admission settings updated successfully!');
+    } catch (err) {
+      console.error('Failed to update settings:', err);
+      alert('Failed to update admission settings.');
     }
   };
 
@@ -144,7 +200,11 @@ export default function AdminDashboard() {
                   <p className="text-[10px] text-muted mb-4 font-mono">Slug: {q.slug}</p>
                   <div className="flex justify-between text-[9px] uppercase tracking-wider text-muted">
                     <span>Engine: {q.type}</span>
-                    <span>Waiting: {q._count?.members || 0}</span>
+                    <span className="flex items-center gap-1.5">
+                      <span>{q.isAutoServe ? 'Auto' : 'Manual'}</span>
+                      <span className="w-1 h-1 rounded-full bg-white/20"></span>
+                      <span>Waiting: {q._count?.members || 0}</span>
+                    </span>
                   </div>
                 </div>
               ))
@@ -167,6 +227,13 @@ export default function AdminDashboard() {
                     <div className="flex items-center gap-2 mt-2">
                       <span className="text-[10px] text-muted font-mono bg-black/25 border border-border px-2 py-0.5 rounded">
                         Key: {selectedQueue.slug}
+                      </span>
+                      <span className={`text-[10px] uppercase tracking-wider font-semibold border px-2 py-0.5 rounded ${
+                        selectedQueue.isAutoServe
+                          ? 'bg-emerald-950/20 text-emerald-300 border-emerald-500/20'
+                          : 'bg-white/5 text-muted border-border'
+                      }`}>
+                        {selectedQueue.isAutoServe ? `Auto-Serve (${selectedQueue.serveInterval}s)` : 'Manual'}
                       </span>
                       <button
                         onClick={() => {
@@ -199,7 +266,7 @@ export default function AdminDashboard() {
                 </div>
 
                 {/* Live Stats */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
                   <div className="border border-border p-4 rounded bg-black/30">
                     <span className="text-[8px] uppercase tracking-widest text-muted">Avg Processing</span>
                     <div className="text-xl font-bold text-white mt-1">{selectedQueue.avgProcessingTime}s</div>
@@ -217,6 +284,68 @@ export default function AdminDashboard() {
                     <div className="text-xl font-bold text-white mt-1">{analytics?.totalAbandoned || 0}</div>
                   </div>
                 </div>
+
+                {/* Admission Flow Settings Panel */}
+                <div className="border border-border rounded-lg p-6 bg-black/20 mb-8 glass-panel">
+                  <h3 className="text-[10px] uppercase tracking-widest text-muted mb-4 border-b border-border pb-2">
+                    Admission Flow Settings
+                  </h3>
+                  <form onSubmit={handleUpdateSettings} className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="text-[11px] font-semibold text-white block">Auto-Serve Mode</span>
+                        <span className="text-[9px] text-muted">Automatically admit users at a fixed rate.</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsAutoServe(!isAutoServe)}
+                        className={`w-10 h-5 rounded-full p-0.5 transition-colors duration-200 focus:outline-none ${
+                          isAutoServe ? 'bg-white' : 'bg-white/10'
+                        }`}
+                      >
+                        <div
+                          className={`w-4 h-4 rounded-full shadow-md transform duration-200 ${
+                            isAutoServe ? 'translate-x-5 bg-black' : 'translate-x-0 bg-white'
+                          }`}
+                        />
+                      </button>
+                    </div>
+
+                    {isAutoServe && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        className="space-y-2 pt-2 border-t border-white/5"
+                      >
+                        <label className="block text-[9px] uppercase tracking-widest text-muted">
+                          Drip-Feed Interval (Seconds)
+                        </label>
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="number"
+                            value={serveInterval}
+                            onChange={(e) => setServeInterval(Math.max(1, Number(e.target.value)))}
+                            className="bg-black/40 border border-border px-3 py-2 rounded text-xs text-white focus:outline-none focus:border-white transition-all font-light w-24"
+                            min="1"
+                            required
+                          />
+                          <span className="text-[10px] text-muted">seconds between admissions</span>
+                        </div>
+                      </motion.div>
+                    )}
+
+                    <div className="flex justify-end pt-2">
+                      <button
+                        type="submit"
+                        className="py-2 px-4 bg-white text-black font-semibold text-[9px] uppercase tracking-widest rounded border border-white hover:bg-transparent hover:text-white transition duration-300"
+                      >
+                        Apply Settings
+                      </button>
+                    </div>
+                  </form>
+                </div>
+
+
 
                 {/* Queue list widgets */}
                 <div>
@@ -242,16 +371,15 @@ export default function AdminDashboard() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-white/5">
-                        {/* We populate mock rows or live rows based on selectedQueue size */}
-                        {Array.from({ length: selectedQueue._count?.members || 0 }).map((_, i) => (
-                          <tr key={i} className="hover:bg-white/5 transition-colors">
-                            <td className="p-3 font-mono text-white">#{i + 1}</td>
-                            <td className="p-3 font-mono text-[10px]">User-Node-{(i * 109 + 2938).toString(36).substring(0,5)}</td>
-                            <td className="p-3">Just now</td>
-                            <td className="p-3">{selectedQueue.type === 'VIP' ? 'Yes' : 'No'}</td>
+                        {activeMembers.map((member) => (
+                          <tr key={member.id} className="hover:bg-white/5 transition-colors">
+                            <td className="p-3 font-mono text-white">#{member.position}</td>
+                            <td className="p-3 font-mono text-[10px]">{member.user?.name || `User-${member.userId.substring(0, 5)}`}</td>
+                            <td className="p-3">{new Date(member.joinedAt).toLocaleTimeString()}</td>
+                            <td className="p-3">{member.isVip ? 'Yes' : 'No'}</td>
                           </tr>
                         ))}
-                        {selectedQueue._count?.members === 0 && (
+                        {activeMembers.length === 0 && (
                           <tr>
                             <td colSpan="4" className="p-8 text-center text-muted font-light text-[11px] uppercase tracking-wider">
                               No active pipeline nodes. Waiting for entrants.
