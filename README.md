@@ -372,6 +372,348 @@ The visualization serves both as a user-facing feature and a system design demon
 
 ---
 
+---
+
+## ✦ Hybrid Admission Engine
+
+QUEUEFLOW supports both manual queue serving and fully automated queue progression.
+
+Administrators can seamlessly switch between:
+
+### Manual Mode
+
+In Manual Mode, administrators explicitly serve users from the queue.
+
+Benefits include:
+
+- Complete control over admissions
+- Human-supervised traffic flow
+- Useful during testing and moderation
+- Ideal for limited-access launches
+
+### Auto-Serve Mode
+
+In Auto-Serve Mode, the platform automatically promotes queue members at configurable intervals.
+
+Benefits include:
+
+- Automated traffic distribution
+- Reduced administrative overhead
+- Predictable user admission rates
+- Consistent platform load management
+
+Mode switching occurs instantly without interrupting queue operations.
+
+---
+
+## ✦ Auto-Serve Scheduler
+
+One of QUEUEFLOW's primary innovations is its configurable Auto-Serve system.
+
+The scheduler continuously manages queue progression based on administrator-defined timing rules.
+
+### Features
+
+- Interval-based user admission
+- Drip-feed traffic management
+- Dynamic scheduler controls
+- Real-time mode switching
+- Queue progression automation
+- Automatic queue synchronization
+- Background processing architecture
+
+### Scheduler Responsibilities
+
+The Auto-Serve engine:
+
+- Monitors queue state
+- Tracks scheduler intervals
+- Promotes eligible users
+- Updates queue positions
+- Broadcasts changes via WebSockets
+- Stops immediately when disabled
+
+This allows administrators to regulate traffic without manually serving users.
+
+---
+
+## ✦ Auto-Serve Workflow
+
+1. Administrator enables Auto-Serve.
+2. Serve interval is configured.
+3. Scheduler initializes.
+4. Countdown begins.
+5. Next eligible queue member is selected.
+6. User is promoted automatically.
+7. Queue positions are recalculated.
+8. Updates are synchronized via WebSockets.
+9. Process repeats continuously.
+10. Scheduler stops when disabled.
+
+---
+
+## ✦ Queue Analytics Engine
+
+QUEUEFLOW captures operational queue metrics to provide visibility into system behavior.
+
+### Tracked Metrics
+
+- Active queue members
+- Total users served
+- Queue growth rate
+- Average wait time
+- Peak traffic periods
+- Queue abandonment rate
+- Admission throughput
+- VIP admission statistics
+
+### Benefits
+
+Analytics allow administrators to:
+
+- Optimize traffic flow
+- Predict congestion
+- Improve admission strategies
+- Monitor launch performance
+- Identify bottlenecks
+
+---
+
+## ✦ Enterprise Use Cases
+
+QUEUEFLOW is designed for a wide variety of high-demand digital experiences.
+
+### Product Launches
+
+Manage traffic spikes during limited-edition product releases.
+
+### Ticket Sales
+
+Prevent server overload during concerts, sporting events, and live performances.
+
+### NFT & Web3 Drops
+
+Coordinate fair access during blockchain-based asset releases.
+
+### Event Registrations
+
+Control registration traffic for conferences, hackathons, workshops, and summits.
+
+### Exclusive Access Campaigns
+
+Provide controlled admission to invite-only experiences and premium launches.
+
+### Beta Testing Programs
+
+Distribute access fairly among testers and early adopters.
+
+---
+
+## ✦ Security Deep Dive
+
+QUEUEFLOW incorporates multiple layers of protection.
+
+### Authentication
+
+- JWT-based authentication
+- Secure token validation
+- Session management
+
+### Authorization
+
+- Role-Based Access Control (RBAC)
+- Administrator permissions
+- Protected administrative actions
+
+### API Security
+
+- Request validation
+- Rate limiting
+- Request throttling
+- Input sanitization
+
+### Infrastructure Security
+
+- Secure database access
+- Environment variable protection
+- Principle of least privilege
+
+---
+
+## ✦ Scalability Considerations
+
+QUEUEFLOW is designed using production-oriented architecture principles.
+
+### Database Scalability
+
+- Indexed queue lookups
+- Optimized query patterns
+- Efficient pagination
+
+### Application Scalability
+
+- Modular service architecture
+- Horizontal scaling readiness
+- Stateless API design
+
+### Real-Time Scalability
+
+- WebSocket broadcasting
+- Event-driven updates
+- Efficient state synchronization
+
+### Future Enhancements
+
+- Redis caching layer
+- Distributed queue processing
+- Multi-region deployment
+- Event streaming systems
+
+---
+
+## ✦ API Reference
+
+### Join Queue
+
+```http
+POST /api/queue/join
+```
+
+### Leave Queue
+
+```http
+DELETE /api/queue/leave/:id
+```
+
+### Get Queue Status
+
+```http
+GET /api/queue/status/:queueId
+```
+
+### Serve Next User
+
+```http
+POST /api/admin/serve-next
+```
+
+### Enable Auto-Serve
+
+```http
+POST /api/admin/queue/:id/auto-serve
+```
+
+Example:
+
+```json
+{
+  "enabled": true,
+  "serveInterval": 30
+}
+```
+
+### Disable Auto-Serve
+
+```http
+POST /api/admin/queue/:id/auto-serve
+```
+
+Example:
+
+```json
+{
+  "enabled": false
+}
+```
+
+---
+
+## ✦ Example Queue Configuration
+
+```json
+{
+  "name": "Limited Edition Product Launch",
+  "isAutoServe": true,
+  "serveInterval": 30
+}
+```
+
+This configuration automatically admits one user every 30 seconds.
+
+---
+
+## ✦ Core Features Deep Dive
+
+### FIFO Queue Processing
+
+Users are admitted in the order they join unless priority routing rules apply.
+
+### VIP Priority Routing
+
+Priority members can receive accelerated admission while preserving overall queue fairness.
+
+### Real-Time Synchronization
+
+WebSockets ensure queue positions and wait-time estimates remain current across all connected clients.
+
+### Administrative Visibility
+
+Administrators receive complete insight into queue activity and traffic flow.
+
+### Traffic Orchestration
+
+QUEUEFLOW transforms queue management into a controllable traffic distribution system.
+
+---
+
+## ✦ Why QueueFlow?
+
+Unlike traditional queue systems, QUEUEFLOW focuses equally on:
+
+- Scalability
+- Transparency
+- User Experience
+- Real-Time Synchronization
+- Administrative Control
+- Visual Engagement
+
+The platform transforms waiting from a passive experience into an interactive and informative experience.
+
+---
+
+## ✦ Contributing
+
+Contributions are welcome.
+
+To contribute:
+
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Submit a pull request
+
+Please ensure code quality, documentation quality, and architectural consistency.
+
+---
+
+## ✦ Future Vision
+
+QUEUEFLOW is being designed as more than a queue application.
+
+Long-term goals include:
+
+- QueueFlow SDK
+- QueueFlow Core NPM Package
+- Multi-Tenant Organizations
+- Public API Platform
+- Webhook Ecosystem
+- Queue Templates Marketplace
+- Enterprise Analytics Suite
+- Distributed Queue Infrastructure
+
+The ultimate objective is to provide a reusable traffic orchestration platform for modern digital experiences.
+
+
 ## ✦ QueueFlow Core Package
 
 QUEUEFLOW is designed to eventually expose its queue engine as a reusable NPM package.
