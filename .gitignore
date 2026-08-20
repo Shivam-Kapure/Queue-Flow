@@ -39,3 +39,7 @@ Thumbs.db
 # Prisma generated client
 /server/prisma/generated-client/
 /server/.env
+
+# Project Explanation & Design files
+/explanation.md
+/system_architecture.md

@@ -2,6 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import { queueCache } from '../cache/queueCache.js';
 import { broadcastQueueUpdate } from '../socket/socketHandler.js';
 import { estimateWaitTime } from 'queueflow-core';
+import { sendEvent, isKafkaEnabled } from '../services/kafkaService.js';
 
 const prisma = new PrismaClient();
 
@@ -71,14 +72,25 @@ export const joinQueue = async (req, res) => {
       isVip
     });
 
-    // Log Event
-    await prisma.queueEvent.create({
-      data: {
-        queueId,
+    // Log Event (Audit Event)
+    const eventMetadata = { userId, isVip, priorityScore: member.priorityScore };
+    if (isKafkaEnabled) {
+      await sendEvent('queue-events', queueId, {
         eventType: 'JOIN',
-        metadata: JSON.stringify({ userId, isVip, priorityScore: member.priorityScore })
-      }
-    });
+        queueId,
+        userId,
+        timestamp: new Date(),
+        metadata: eventMetadata
+      });
+    } else {
+      await prisma.queueEvent.create({
+        data: {
+          queueId,
+          eventType: 'JOIN',
+          metadata: JSON.stringify(eventMetadata)
+        }
+      });
+    }
 
     // Fetch refreshed position from cache
     const position = await queueCache.getMemberPosition(queueId, userId);
@@ -134,40 +146,50 @@ export const leaveQueue = async (req, res) => {
     // Sync memory cache
     await queueCache.leave(queueId, userId);
 
-    // Log Event
-    await prisma.queueEvent.create({
-      data: {
-        queueId,
-        eventType: 'LEFT',
-        metadata: JSON.stringify({ userId, leftAt: new Date() })
-      }
-    });
-
-    // Update daily analytics (increment abandoned count)
+    // Log Event and Update Analytics (Audit & Stats)
     const now = new Date();
-    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    let analyticsRecord = await prisma.analytics.findFirst({
-      where: {
+    const eventMetadata = { userId, leftAt: now };
+    if (isKafkaEnabled) {
+      await sendEvent('queue-events', queueId, {
+        eventType: 'LEFT',
         queueId,
-        date: { gte: startOfDay }
-      }
-    });
-
-    if (!analyticsRecord) {
-      await prisma.analytics.create({
-        data: {
-          queueId,
-          date: now,
-          abandonedCount: 1
-        }
+        userId,
+        timestamp: now,
+        metadata: eventMetadata
       });
     } else {
-      await prisma.analytics.update({
-        where: { id: analyticsRecord.id },
+      await prisma.queueEvent.create({
         data: {
-          abandonedCount: analyticsRecord.abandonedCount + 1
+          queueId,
+          eventType: 'LEFT',
+          metadata: JSON.stringify(eventMetadata)
         }
       });
+
+      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      let analyticsRecord = await prisma.analytics.findFirst({
+        where: {
+          queueId,
+          date: { gte: startOfDay }
+        }
+      });
+
+      if (!analyticsRecord) {
+        await prisma.analytics.create({
+          data: {
+            queueId,
+            date: now,
+            abandonedCount: 1
+          }
+        });
+      } else {
+        await prisma.analytics.update({
+          where: { id: analyticsRecord.id },
+          data: {
+            abandonedCount: analyticsRecord.abandonedCount + 1
+          }
+        });
+      }
     }
 
     // Broadcast updated positions to all remaining members

@@ -92,6 +92,8 @@ The platform is designed to simulate production-grade traffic management systems
 * Socket.io
 * JWT Authentication
 * Prisma ORM
+* Apache Kafka (`kafkajs`)
+
 
 ### Database
 
@@ -157,24 +159,55 @@ QUEUEFLOW intentionally incorporates several real-world system design principles
 ## ✦ System Architecture
 
 ```mermaid
-graph TD
-    A[Client User]
-    B[Express API Gateway]
-    C[Rate Limiter]
-    D[Queue Engine]
-    E[PostgreSQL Database]
-    F[WebSocket Server]
-    G[Admin Dashboard]
-    H[Notification Service]
+flowchart TD
+    subgraph Client Tier [Client Tier - React / Zustand / Three.js]
+        U[End User client]
+        A[Admin Dashboard]
+    end
 
-    A -->|HTTP Request| B
-    B --> C
-    C --> D
-    D --> E
-    D --> F
-    F --> A
-    G --> D
-    D --> H
+    subgraph API Gateway / Load Control
+        RL[Rate Limiter Middleware]
+        Auth[JWT Authentication & RBAC]
+    end
+
+    subgraph Application Tier [Application Tier - Express.js]
+        QC[Queue Cache Service]
+        QE[QueueFlow Core Engine]
+        AS[Auto-Serve Scheduler]
+        WS[Socket.io WebSockets Server]
+        KP[Kafka Producer Service]
+    end
+
+    subgraph Event Streaming Tier [Event Streaming Tier - Kafka]
+        KB[Kafka Broker - queue-events Topic]
+    end
+
+    subgraph Worker Tier [Background Workers]
+        KC[Kafka Consumer Worker]
+    end
+
+    subgraph Database Tier [Database Tier - Neon PostgreSQL]
+        DB[(PostgreSQL DB)]
+    end
+
+    %% Flow lines
+    U -->|1. Join Request HTTP| RL
+    RL -->|2. Validate Auth| Auth
+    Auth -->|3. Mutation| QC
+    QC <-->|4. Read/Write memory Map| QE
+    QC -->|5. Bulk update positions| DB
+    
+    %% Kafka events
+    QC -->|6. Trigger Event| KP
+    KP -->|7. Publish event| KB
+    KB -->|8. Consume event| KC
+    KC -->|9. Write Audits & Analytics| DB
+
+    AS -->|10. Periodic Serve Tick| QC
+    A -->|11. Manual Serve Command| QC
+    
+    QC -.->|12. Broadcast updates| WS
+    WS -.->|13. Live position & Served alerts| U
 ```
 
 ---
@@ -239,6 +272,7 @@ queueflow/
     │   ├── controllers/
     │   ├── routes/
     │   ├── services/
+    │   ├── workers/
     │   ├── socket/
     │   ├── queue-engine/
     │   ├── analytics/
@@ -285,6 +319,7 @@ Defines access permissions and authorization levels.
 
 * Node.js 18+
 * PostgreSQL
+* Apache Kafka broker (optional, system falls back to direct database writes when disabled)
 * npm
 
 ---
@@ -317,7 +352,14 @@ PORT=5000
 DATABASE_URL="postgresql://user:password@host/database?sslmode=require"
 
 JWT_SECRET="your-secret-key"
+
+# Kafka Settings
+USE_KAFKA="false" # Set to "true" to enable Kafka integration
+KAFKA_BROKERS="localhost:9092"
+KAFKA_CLIENT_ID="queueflow-api"
+KAFKA_GROUP_ID="queueflow-group"
 ```
+
 
 ---
 

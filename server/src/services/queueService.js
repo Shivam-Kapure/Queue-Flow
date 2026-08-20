@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { queueCache } from '../cache/queueCache.js';
 import { broadcastQueueUpdate, broadcastUserServed } from '../socket/socketHandler.js';
+import { sendEvent, isKafkaEnabled } from './kafkaService.js';
 
 const prisma = new PrismaClient();
 
@@ -43,48 +44,58 @@ export const processServeNext = async (queueId) => {
     }
   });
 
-  // Log the event
-  await prisma.queueEvent.create({
-    data: {
-      queueId,
+  // Log Event and Update Analytics (Audit & Stats)
+  const eventMetadata = { userId: servedMember.id, servedAt: now, joinedAt: dbMember.joinedAt };
+  if (isKafkaEnabled) {
+    await sendEvent('queue-events', queueId, {
       eventType: 'SERVED',
-      metadata: JSON.stringify({ userId: servedMember.id, servedAt: now })
-    }
-  });
-
-  // Update daily analytics
-  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const waitTimeSeconds = (now.getTime() - new Date(dbMember.joinedAt).getTime()) / 1000;
-
-  let analyticsRecord = await prisma.analytics.findFirst({
-    where: {
       queueId,
-      date: {
-        gte: startOfDay
-      }
-    }
-  });
-
-  if (!analyticsRecord) {
-    await prisma.analytics.create({
-      data: {
-        queueId,
-        date: now,
-        servedCount: 1,
-        avgWaitTime: waitTimeSeconds
-      }
+      userId: servedMember.id,
+      timestamp: now,
+      metadata: eventMetadata
     });
   } else {
-    const newServedCount = analyticsRecord.servedCount + 1;
-    const newAvgWaitTime = ((analyticsRecord.avgWaitTime * analyticsRecord.servedCount) + waitTimeSeconds) / newServedCount;
-
-    await prisma.analytics.update({
-      where: { id: analyticsRecord.id },
+    await prisma.queueEvent.create({
       data: {
-        servedCount: newServedCount,
-        avgWaitTime: newAvgWaitTime
+        queueId,
+        eventType: 'SERVED',
+        metadata: JSON.stringify(eventMetadata)
       }
     });
+
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const waitTimeSeconds = (now.getTime() - new Date(dbMember.joinedAt).getTime()) / 1000;
+
+    let analyticsRecord = await prisma.analytics.findFirst({
+      where: {
+        queueId,
+        date: {
+          gte: startOfDay
+        }
+      }
+    });
+
+    if (!analyticsRecord) {
+      await prisma.analytics.create({
+        data: {
+          queueId,
+          date: now,
+          servedCount: 1,
+          avgWaitTime: waitTimeSeconds
+        }
+      });
+    } else {
+      const newServedCount = analyticsRecord.servedCount + 1;
+      const newAvgWaitTime = ((analyticsRecord.avgWaitTime * analyticsRecord.servedCount) + waitTimeSeconds) / newServedCount;
+
+      await prisma.analytics.update({
+        where: { id: analyticsRecord.id },
+        data: {
+          servedCount: newServedCount,
+          avgWaitTime: newAvgWaitTime
+        }
+      });
+    }
   }
 
   // Broadcast the served user update to that queue socket room
