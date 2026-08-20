@@ -158,56 +158,57 @@ QUEUEFLOW intentionally incorporates several real-world system design principles
 
 ## ✦ System Architecture
 
-```mermaid
-flowchart TD
-    subgraph Client Tier [Client Tier - React / Zustand / Three.js]
-        U[End User client]
-        A[Admin Dashboard]
-    end
+```text
+================================================================================
+                               SYSTEM ARCHITECTURE
+================================================================================
 
-    subgraph API Gateway / Load Control
-        RL[Rate Limiter Middleware]
-        Auth[JWT Authentication & RBAC]
-    end
-
-    subgraph Application Tier [Application Tier - Express.js]
-        QC[Queue Cache Service]
-        QE[QueueFlow Core Engine]
-        AS[Auto-Serve Scheduler]
-        WS[Socket.io WebSockets Server]
-        KP[Kafka Producer Service]
-    end
-
-    subgraph Event Streaming Tier [Event Streaming Tier - Kafka]
-        KB[Kafka Broker - queue-events Topic]
-    end
-
-    subgraph Worker Tier [Background Workers]
-        KC[Kafka Consumer Worker]
-    end
-
-    subgraph Database Tier [Database Tier - Neon PostgreSQL]
-        DB[(PostgreSQL DB)]
-    end
-
-    %% Flow lines
-    U -->|1. Join Request HTTP| RL
-    RL -->|2. Validate Auth| Auth
-    Auth -->|3. Mutation| QC
-    QC <-->|4. Read/Write memory Map| QE
-    QC -->|5. Bulk update positions| DB
-    
-    %% Kafka events
-    QC -->|6. Trigger Event| KP
-    KP -->|7. Publish event| KB
-    KB -->|8. Consume event| KC
-    KC -->|9. Write Audits & Analytics| DB
-
-    AS -->|10. Periodic Serve Tick| QC
-    A -->|11. Manual Serve Command| QC
-    
-    QC -.->|12. Broadcast updates| WS
-    WS -.->|13. Live position & Served alerts| U
+  [ Client User ]                      [ Admin Dashboard ]
+         │                                      │
+         │ (Join Request)                       │ (Serve Request)
+         ▼                                      ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ API Gateway / Throttling & Auth Middleware                                   │
+│  - Rate Limiter (IP/User Throttling)                                         │
+│  - JWT Verification & RBAC Access Control                                    │
+└──────────────────────────────────────┬───────────────────────────────────────┘
+                                       │
+                                       ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ Application Tier (Express.js API Engine)                                     │
+│                                                                              │
+│  ┌────────────────────────┐  ◄───────────────►  ┌─────────────────────────┐  │
+│  │   Queue Cache Service  │   (Read/Write)     │  QueueFlow Core Engine  │  │
+│  │    (In-Memory Map)     │                    │  (FIFO / Priority / VIP)│  │
+│  └───────────┬────────────┘                    └─────────────────────────┘  │
+│              │                                                               │
+│              │ (Sync Queue Positions)                                        │
+│              ├─────────────────────────────────────────┐                     │
+│              ▼                                         ▼                     │
+│  ┌────────────────────────┐              ┌──────────────────────────┐        │
+│  │  Kafka Producer Serv   │              │   Auto-Serve Scheduler   │        │
+│  │  (Event Dispatcher)    │              │   (Background Interval)  │        │
+│  └───────────┬────────────┘              └──────────────────────────┘        │
+└──────────────┼───────────────────────────────────────────────────────────────┘
+               │                                         │
+               │ (Publish Events)                        │ (Direct DB writes)
+               ▼                                         ▼
+┌─────────────────────────────┐           ┌────────────────────────────────────┐
+│ Event Streaming (Kafka)     │           │ Database Tier (PostgreSQL / Neon)  │
+│  - Topic: "queue-events"    │           │                                    │
+└──────────────┬──────────────┘           │  - Queue Configurations            │
+               │                          │  - Queue Memberships (Positions)   │
+               │ (Consume Events)         │  - Audit Logs (QueueEvents)        │
+               ▼                          │  - Daily Analytics Records         │
+┌─────────────────────────────┐           │                                    │
+│ Background Workers          │           │                                    │
+│  - Kafka Consumer Worker    ├──────────►│                                    │
+│    (Audit & Analytics)      │ (Writes)  │                                    │
+└─────────────────────────────┘           └────────────────────────────────────┘
+               ▲                                         ▲
+               │                                         │
+               └───────────────── WebSockets ────────────┘
+                            (Socket.io Broadcaster)
 ```
 
 ---
